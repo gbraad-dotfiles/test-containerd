@@ -1,0 +1,86 @@
+name: Test nerdctl with systemd
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - "main"
+  pull_request: {}
+
+
+jobs:
+  test-nerdctl-systemd:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository code
+        uses: actions/checkout@v4
+
+      - name: Enable linger and create user session (workaround)
+        uses: gbraad-actions/blacksmith-user-session@main  
+      
+      - name: Allow unprivileged userns (workaround)
+        uses: gbraad-actions/warpbuild-unprivileged-userns@main
+
+      - name: Remove unwanted stuff
+        if: ${{ inputs.cleanup  }}
+        uses: gbraad-actions/remove-unwanted@v1
+
+      - name: Change containers storage
+        uses: gbraad-actions/change-containers-storage@v1
+
+      - name: Get last 3 chars of hostname
+        id: runner_id
+        run: |
+          echo "last3=${HOSTNAME: -3}" >> $GITHUB_OUTPUT
+
+      - name: Tailscale
+        uses: gbraad-actions/tailscale-action@v1
+        with:
+          authkey: ${{ secrets.TAILSCALE_AUTHKEY }}
+          args: --ssh --accept-dns=false --operator=runner --advertise-exit-node
+          hostname: "dotfiles-${{ steps.runner_id.outputs.last3 }}"
+
+      # creates user session?
+      - name: Install nerdctl
+        uses: gbraad-actions/setup-container-tools@v2
+        with:
+          runtime: containerd
+
+      - name: Run container with systemd
+        run: |
+          nerdctl run -d \
+            --privileged \
+            --name testsys \
+            --hostname testsys \
+            --cgroup-manager=none \
+            ghcr.io/gbraad-dotfiles/opensuse:latest
+
+      - name: Wait for systemd to be ready
+        run: |
+          timeout 30 bash -c '
+            until nerdctl exec testsys systemctl is-system-running 2>/dev/null | grep -qE "running|degraded"; do
+              sleep 1
+            done
+          '
+
+      - name: Show systemd status
+        run: |
+          nerdctl exec testsys systemctl --no-pager status || true
+          nerdctl exec testsys systemctl --no-pager list-units --state=running
+
+      - name: Check Tailscale service
+        run: |
+          nerdctl exec testsys systemctl is-active tailscaled
+
+      - name: Show container logs on failure
+        if: failure()
+        run: |
+          nerdctl logs testsys
+
+      - name: Hang around
+        if: failure()
+        run: |
+          IP=`tailscale ip -4`
+          echo "Use the following command to connect \`tailscale ssh runner@${IP}\` or \`rscreen runner@${IP}\`"
+          sleep 18000
