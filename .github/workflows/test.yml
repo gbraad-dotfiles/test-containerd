@@ -1,4 +1,4 @@
-name: Test nerdctl with systemd
+name: Run Fedora using nerdctl with systemd
 
 on:
   workflow_dispatch:
@@ -41,42 +41,56 @@ jobs:
           args: --ssh --accept-dns=false --operator=runner --advertise-exit-node
           hostname: "dotfiles-${{ steps.runner_id.outputs.last3 }}"
 
-      # creates user session?
+      - name: Create and share userdirs
+        run: |
+          cd ${{ github.workspace }}
+          mkdir -p Projects Documents Downloads
+          ln -s ${{ github.workspace }}/Projects  ${HOME}/Projects
+          ln -s ${{ github.workspace }}/Documents ${HOME}/Documents
+          ln -s ${{ github.workspace }}/Downloads ${HOME}/Downloads
+          tailscale drive share projects ${HOME}/Projects
+          tailscale drive share documents ${HOME}/Documents
+          tailscale drive share downloads ${HOME}/Downloads
+
+      - name: Dotfiles (install from action)
+        uses: gbraad-dotfiles/install-action@main
+        with:
+          upstream: true
+
       - name: Install nerdctl
         uses: gbraad-actions/setup-container-tools@v2
         with:
           runtime: containerd
 
-      - name: Run container with systemd
-        run: |
-          nerdctl run -d \
-            --privileged \
-            --name testsys \
-            --hostname testsys \
-            --cgroup-manager=none \
-            ghcr.io/gbraad-dotfiles/opensuse:latest
+      - name: Set containerd as runtime for devenv
+        uses: gbraad-actions/zsh-action@main
+        with:
+          run: |
+            git config -f ~/.config/dotfiles/local/devenv.ini 'devenv.runtime' 'nerdctl'
 
-      - name: Wait for systemd to be ready
-        run: |
-          timeout 30 bash -c '
-            until nerdctl exec testsys systemctl is-system-running 2>/dev/null | grep -qE "running|degraded"; do
-              sleep 1
-            done
-          '
+      - name: Start Fedora container image
+        uses: gbraad-dotfiles/devenv-action@main
+        with:
+          prefix: dotfedora
+          command: start
 
-      - name: Show systemd status
-        run: |
-          nerdctl exec testsys systemctl --no-pager status || true
-          nerdctl exec testsys systemctl --no-pager list-units --state=running
+      - name: Install Apache
+        uses: gbraad-dotfiles/devenv-action@main
+        with:
+          prefix: dotfedora
+          command: sudo dnf install -y httpd
 
-      - name: Check Tailscale service
-        run: |
-          nerdctl exec testsys systemctl is-active tailscaled
+      - name: Enable Apache service
+        uses: gbraad-dotfiles/devenv-action@main
+        with:
+          prefix: dotfedora
+          command: sudo systemctl enable --now httpd
 
-      - name: Show container logs on failure
-        if: failure()
-        run: |
-          nerdctl logs testsys
+      - name: Verify status
+        uses: gbraad-dotfiles/devenv-action@main
+        with:
+          prefix: dotfedora
+          command: systemctl status
 
       - name: Hang around
         if: failure()
