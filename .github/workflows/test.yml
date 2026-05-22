@@ -63,10 +63,10 @@ jobs:
           runtime: containerd
 
       - name: Set containerd as runtime for devenv
-        uses: gbraad-actions/zsh-action@main
+        uses: gbraad-dotfiles/dotini-action@main
         with:
-          run: |
-            git config -f ~/.config/dotfiles/local/devenv.ini 'devenv.runtime' 'nerdctl'
+          inifile: devenv
+          args: devenv.runtime "nerdctl"
 
       - name: Start Fedora container image
         uses: gbraad-dotfiles/devenv-action@main
