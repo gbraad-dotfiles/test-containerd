@@ -1,4 +1,4 @@
-name: Run Fedora using nerdctl with systemd
+name: Run Fedora dotfiles container using nerdctl
 
 on:
   workflow_dispatch:
@@ -9,7 +9,7 @@ on:
 
 
 jobs:
-  test-nerdctl-systemd:
+  test-nerdctl-fedora:
     runs-on: ubuntu-latest
 
     steps:
